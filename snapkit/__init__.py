@@ -62,8 +62,15 @@ from snapkit.fleet import (
     FleetEvent,
     FleetAlert,
 )
+from snapkit.audio import (
+    midi_to_freq,
+    write_wav,
+    synthesize_events,
+    synthesize_demo,
+    harmony_demo_audio,
+)
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 __all__ = [
     # Eisenstein
     "EisensteinInteger",
@@ -130,4 +137,10 @@ __all__ = [
     "VesselSnapshot",
     "FleetEvent",
     "FleetAlert",
+    # Audio (v2.5)
+    "midi_to_freq",
+    "write_wav",
+    "synthesize_events",
+    "synthesize_demo",
+    "harmony_demo_audio",
 ]

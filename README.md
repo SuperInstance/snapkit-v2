@@ -1,15 +1,35 @@
-# SnapKit v2 — Eisenstein Lattice Snap, Temporal, Spectral, Connectome, FLUX-Tensor-MIDI
+# snapkit-v2
 
-Constraint geometry snap toolkit for Python. Snaps continuous 2D points to the **Eisenstein A₂ lattice** (densest 2D packing), provides temporal beat-grid alignment, spectral analysis, connectome (room coupling) detection, FLUX-Tensor-MIDI timing, **Harmony Governor** (FEP friction monitoring), and **Hypothesis Sandbox** (forward simulation + óthismos scoring). **Zero external dependencies. stdlib only. Python ≥ 3.10.**
+The Architecture of Harmony — a triadic cognitive architecture for multi-agent systems based on the Free Energy Principle.
 
-## Why Eisenstein?
+## What is this?
 
-The Eisenstein integers ℤ[ω] (ω = e^(2πi/3)) form the A₂ root lattice — hexagonal grid, densest possible packing in 2D:
+snapkit-v2 is a constraint-geometry toolkit that implements FEP (Free Energy Principle) cognition for AI agents. Each agent operates on the Eisenstein A₂ lattice, communicates via MIDI-style temporal events, and is monitored by a Harmony Governor that measures "friction" — the degree to which an agent's internal model fails to predict its sensory inputs.
 
-- **12-fold symmetry** (6 rotations × 2 reflections)
-- **Optimal covering** — minimizes max distance from any point to its nearest lattice point
-- **PID property** — H¹ = 0 guarantee for sheaf-theoretic consistency
-- **Isotropic error** — hexagonal Voronoï cells spread quantization evenly
+## The Triadic Architecture
+
+```
+┌─────────────────────────────────────────┐
+│  Layer 3: Executive (Agency)            │
+│  Wakes on friction alarm, improvises    │
+│  (rewrites constraints, cross-wires I/O)│
+└──────────────────┬──────────────────────┘
+                   │ tuning forks
+                   ▼
+┌─────────────────────────────────────────┐
+│  Layer 2: Harmony Governor              │
+│  Measures cognitive friction (Φ)        │
+│  Triggers Executive when Φ > deadband   │
+└──────┬───────────────────────┬──────────┘
+       │ MIDI ch 0             │ MIDI ch N
+       ▼                       ▼
+┌──────────────┐      ┌──────────────┐
+│  Layer 1     │      │  Layer 1     │
+│  Sandbox     │      │  Sandbox     │
+│  Forward     │      │  Forward     │
+│  simulation  │      │  simulation  │
+└──────────────┘      └──────────────┘
+```
 
 ## Install
 
@@ -18,209 +38,164 @@ pip install cocapn-snapkit
 ```
 
 From source:
-
 ```bash
 git clone https://github.com/SuperInstance/snapkit-v2
 cd snapkit-v2
 pip install -e .
 ```
 
+For MIDI hardware support:
+```bash
+pip install cocapn-snapkit[midi]
+```
+
 ## Quick Start
 
-### Eisenstein Lattice Snap
+### Run the integration demo
 
-```python
-from snapkit import EisensteinInteger, eisenstein_snap, eisenstein_round
-
-# Snap a complex number to the nearest Eisenstein integer
-z = complex(0.3, 0.7)
-nearest, distance, is_snap = eisenstein_snap(z, tolerance=0.5)
-print(f"{nearest} — distance={distance:.4f}, snapped={is_snap}")
-# EisensteinInteger(0, 1) — distance=0.1339, snapped=True
-
-# Round directly
-e = EisensteinInteger.from_complex(z)
-
-# Arithmetic
-a = EisensteinInteger(3, 1)
-b = EisensteinInteger(1, 2)
-print(a + b)          # EisensteinInteger(4, 3)
-print(a * b)          # EisensteinInteger(1, 7)
-print(a.conjugate())  # EisensteinInteger(4, -1)
+```bash
+python3 examples/harmony_demo.py
 ```
 
-### Temporal Snap (Beat Grid + T-minus-0)
+Simulates a fishing boat in calm → rough seas. Shows the full triadic architecture in action.
 
-```python
-from snapkit import BeatGrid, TemporalSnap
+### View the maritime token lattice
 
-grid = BeatGrid(period=1.0, phase=0.0)
-snap = TemporalSnap(grid, tolerance=0.1, t0_threshold=0.05)
-
-result = snap.observe(t=1.04, value=0.3)
-print(f"On beat: {result.is_on_beat}, offset: {result.offset:.3f}")
-
-# T-minus-0 detection: zero-crossing in value derivatives
-result = snap.observe(t=2.01, value=0.001)
-print(f"T-0 detected: {result.is_t_minus_0}")
+```bash
+snapkit lattice
 ```
 
-### Spectral Analysis
+### Run the harmony monitor
 
-```python
-from snapkit import spectral_summary
-import random
-
-signal = [random.gauss(0, 1) for _ in range(500)]
-summary = spectral_summary(signal)
-print(f"Entropy: {summary.entropy_bits:.2f} bits")
-print(f"Hurst: {summary.hurst:.3f} (stationary: {summary.is_stationary})")
-print(f"ACF lag-1: {summary.autocorr_lag1:.3f}, decay: {summary.autocorr_decay}")
+```bash
+snapkit harmony --period 1.0 --deadband 1.5
 ```
 
-### Connectome (Room Coupling Detection)
+### Listen to the harmony
 
 ```python
-from snapkit import TemporalConnectome
-
-conn = TemporalConnectome(threshold=0.3, max_lag=5)
-conn.add_room("alpha", [0.1, 0.5, 0.3, 0.8, 0.2])
-conn.add_room("beta",  [0.2, 0.4, 0.4, 0.7, 0.3])
-conn.add_room("gamma", [0.9, 0.1, 0.7, 0.2, 0.8])
-
-result = conn.analyze()
-for pair in result.significant:
-    print(f"{pair.room_a} ↔ {pair.room_b}: {pair.coupling.value} (r={pair.correlation:.3f}, lag={pair.lag})")
-
-print(result.to_graphviz())               # Graphviz DOT output
-names, matrix = result.adjacency_matrix() # Correlation matrix
+from snapkit.audio import harmony_demo_audio
+harmony_demo_audio("/tmp/harmony.wav")
 ```
 
-### FLUX-Tensor-MIDI
+### Use as a library
 
 ```python
-from snapkit import FluxTensorMIDI, TempoMap
+from snapkit.governor import HarmonyGovernor
+from snapkit.sandbox import HypothesisSandbox
+from snapkit.executive import ExecutiveAgent
+from snapkit.midi_io import MIDIBridge
+from snapkit.clever_tokens import create_maritime_lattice
 
-flux = FluxTensorMIDI(TempoMap(ticks_per_beat=480, initial_bpm=120))
-piano = flux.add_room("piano", channel=0)
-drums = flux.add_room("drums", channel=9)
+# Set up the triadic architecture
+gov = HarmonyGovernor()
+gov.register_channel("helm", channel=0)
 
-flux.note_on("piano", tick=0, note=60, velocity=100)
-flux.note_off("piano", tick=480, note=60)
-flux.note_on("drums", tick=0, note=36)
+sandbox = HypothesisSandbox(sensor_name="heading")
+sandbox.set_action_range(-1.0, 1.0, step=0.1)
 
-events = flux.render()       # sorted by tick
-quantized = flux.quantize(grid=120)  # snap to 16th note grid
-flux.tempo.set_tempo(tick=960, bpm=140)
-seconds = flux.tempo.tick_to_seconds(1920)
+executive = ExecutiveAgent(gov)
+executive.register_agent("helm", channel=0)
+
+bridge = MIDIBridge(governor=gov)
+bridge.register_sensor("heading", lo=0, hi=360)
+
+# In your main loop:
+gov.tick()
+phi = sandbox.evaluate(sensor_current=heading, target_sensor=target)
+sandbox.observe(action_taken=best_action, sensor_before=h, sensor_after=h2)
+gov.record_observation("helm", prediction=p, actual=h2)
+
+# When something breaks:
+results = executive.handle_alarms()
 ```
 
-## API Reference
+## Physical Hardware
 
-### `snapkit.eisenstein` — Lattice Operations
+### ESP32 + MPU6050 IMU
 
-| Symbol | Description |
-|--------|-------------|
-| `EisensteinInteger(a, b)` | Frozen dataclass on the A₂ lattice |
-| `EisensteinInteger.complex` | Cartesian complex representation |
-| `EisensteinInteger.norm_squared` | a² − ab + b² (always ≥ 0) |
-| `EisensteinInteger.from_complex(z)` | Round → nearest Eisenstein integer |
-| `eisenstein_round(z)` | True nearest via Voronoï cell |
-| `eisenstein_round_naive(z)` | Legacy 4-candidate rounding |
-| `eisenstein_snap(z, tol=0.5)` | Snap with tolerance check → `(EI, float, bool)` |
-| `eisenstein_snap_batch(pts, tol)` | Vectorized snap |
-| `eisenstein_distance(z1, z2)` | Lattice distance |
-| `eisenstein_fundamental_domain(z)` | Reduce to canonical representative |
+See `firmware/esp32_mpu6050_imu/`. Flash the Arduino sketch, connect to a serial port, and feed IMU data to the MIDI bridge:
 
-Arithmetic: `+`, `-`, `*`, `conjugate()`, `abs()`.
+```python
+import serial, json
+from snapkit.midi_io import MIDIBridge
 
-### `snapkit.eisenstein_voronoi` — Voronoï Cell Snap
+bridge = MIDIBridge(governor=gov)
+ser = serial.Serial('/dev/ttyUSB0', 115200)
 
-| Symbol | Description |
-|--------|-------------|
-| `eisenstein_snap_voronoi(x, y)` | True nearest-neighbor (squared distance, no sqrt) |
-| `eisenstein_snap_naive(x, y)` | Fast approximate snap |
-| `eisenstein_snap_batch(points)` | Vectorized Voronoï |
-| `eisenstein_to_real(a, b)` | (a, b) → (x, y) Cartesian |
-| `snap_distance(x, y, a, b)` | Euclidean distance to lattice point |
+while True:
+    line = ser.readline()
+    data = json.loads(line)
+    if 'roll' in data:
+        bpm = bridge.feed_roll(data['roll'])
+        print(f"Hull tempo: {bpm:.1f} BPM")
+```
 
-### `snapkit.temporal` — Beat Grid & T-minus-0
+## Architecture Layers
 
-| Symbol | Description |
-|--------|-------------|
-| `BeatGrid(period, phase, t_start)` | Periodic time grid |
-| `BeatGrid.snap(t, tolerance)` | Snap → `TemporalResult` |
-| `BeatGrid.snap_batch(timestamps, tol)` | Vectorized snap |
-| `BeatGrid.nearest_beat(t)` | `(beat_time, beat_index)` |
-| `BeatGrid.beats_in_range(t_start, t_end)` | All beats in interval |
-| `TemporalSnap(grid, tolerance, t0_threshold, t0_window)` | Beat snap + zero-crossing detection |
-| `TemporalSnap.observe(t, value)` | Feed observation → `TemporalResult` |
+| Module | Purpose |
+|--------|---------|
+| `eisenstein.py` | Geometric constraint space (A₂ lattice) |
+| `temporal.py` | BeatGrid, T-minus-0 detection |
+| `spectral.py` | Entropy, Hurst exponent, autocorrelation |
+| `connectome.py` | Coupled/anti-coupled room detection |
+| `midi.py` | FluxTensorMIDI protocol |
+| `midi_io.py` | Bridge to physical sensors |
+| `clever_tokens.py` | Lattice-anchored constraint tokens |
+| `sandbox.py` | Layer 1: Forward simulation + óthismos scoring |
+| `governor.py` | Layer 2: FEP friction monitoring |
+| `executive.py` | Layer 3: Improvisation protocol |
+| `fleet.py` | Multi-vessel coordination |
+| `othismos_bridge.py` | Connects to the othismos library |
+| `audio.py` | Synthesize MIDI bus as audio (listen to harmony) |
+| `cli.py` | Command-line tools |
 
-### `snapkit.spectral` — Signal Analysis
+## Web Dashboard
 
-| Symbol | Description |
-|--------|-------------|
-| `entropy(data, bins=10)` | Shannon entropy via histogram |
-| `hurst_exponent(data)` | R/S analysis (H ≈ 0.5 = random, > 0.5 = trending, < 0.5 = mean-reverting) |
-| `autocorrelation(data, max_lag)` | Normalized autocorrelation |
-| `spectral_summary(data, bins, max_lag)` | → `SpectralSummary` |
-| `spectral_batch(series_list, bins, max_lag)` | Batch analysis |
+Open `examples/harmony_dashboard.html` in a browser for a real-time view of:
+- Per-channel friction state
+- Hull-derived tempo
+- MIDI piano roll
+- Event log
 
-### `snapkit.connectome` — Room Coupling
+For a live deployment, serve the dashboard from a Fleet Coordinator:
+```bash
+docker run -p 8000:8000 snapkit-v2
+```
 
-| Symbol | Description |
-|--------|-------------|
-| `TemporalConnectome(threshold, max_lag, min_samples)` | Cross-correlation coupling detection |
-| `TemporalConnectome.add_room(name, activity)` | Register room activity trace |
-| `TemporalConnectome.analyze()` | → `ConnectomeResult` |
-| `ConnectomeResult.coupled` / `.anti_coupled` / `.significant` | Coupled pair lists |
-| `ConnectomeResult.adjacency_matrix()` | `(names, matrix)` |
-| `ConnectomeResult.to_graphviz()` | DOT string |
-| `RoomPair` | `room_a`, `room_b`, `coupling`, `correlation`, `lag`, `confidence` |
-| `CouplingType` | `COUPLED`, `ANTI_COUPLED`, `UNCOUPLED` |
+## JavaScript / TypeScript
 
-### `snapkit.midi` — FLUX-Tensor-MIDI
+The core primitives are available in TypeScript at `js/snapkit.ts` for browser-side use:
 
-| Symbol | Description |
-|--------|-------------|
-| `FluxTensorMIDI(tempo_map)` | Conductor: rooms, events, quantize, render |
-| `FluxTensorMIDI.add_room(name, channel, voice)` | Register a room (musician) |
-| `FluxTensorMIDI.note_on(room, tick, note, velocity)` | Schedule note-on |
-| `FluxTensorMIDI.note_off(room, tick, note)` | Schedule note-off |
-| `FluxTensorMIDI.render()` | All events sorted by tick |
-| `FluxTensorMIDI.quantize(grid)` | Snap events to grid |
-| `TempoMap(ticks_per_beat, initial_bpm)` | Tick ↔ seconds with tempo changes |
+```typescript
+import { HarmonyGovernor, BeatGrid, TokenLattice } from './snapkit.js';
 
-## Performance
-
-- Voronoï snap uses **squared-distance comparison** (no `sqrt` in hot path)
-- `BeatGrid` uses **precomputed inverse period** (`1/period`)
-- Autocorrelation uses **local variable caching** and precomputed `inv_r0`
-- All dataclasses use `__slots__` / `frozen=True`
-- Batch operations available on all modules
-
-## Connection to Constraint Theory
-
-SnapKit v2 is the production core of the Cocapn constraint theory system:
-
-- **Eisenstein lattice** — optimal 2D quantization (A₂ root system)
-- **Temporal snap** — FLUX-Tensor timing for multi-room coordination
-- **Spectral analysis** — self-similarity (Hurst) and entropy for snap calibration
-- **Connectome** — coupled/anti-coupled room detection for the constraint network
-- **MIDI** — FLUX-Tensor-MIDI protocol for temporal constraint enforcement
-
-## Documentation
-
-- [User Guide](docs/USER-GUIDE.md) — Complete usage documentation
+const gov = new HarmonyGovernor();
+gov.registerChannel('helm', 0, 1.5);
+gov.tick();
+gov.recordObservation('helm', 180.0, 182.0);
+console.log(gov.systemState());
+```
 
 ## Related Repos
 
-- [snapkit-js](https://github.com/SuperInstance/snapkit-js) — JavaScript/TypeScript version (Eisenstein + temporal + spectral)
-- [constraint-theory-core](https://github.com/SuperInstance/constraint-theory-core) — Mathematical primitives
-- [style-dna](https://github.com/SuperInstance/style-dna) — Musical DNA extraction and style morphing
-- [spline-midi-smooth](https://github.com/SuperInstance/spline-midi-smooth) — Spline interpolation for MIDI automation
-- [copilot-for-eclipse](https://github.com/SuperInstance/copilot-for-eclipse) — Constraint Theory MCP for Copilot in Eclipse
+- [othismos](https://github.com/SuperInstance/othismos) — Constraint pressure theory
+- [constraint-theory-core](https://github.com/SuperInstance/constraint-theory-core) — Algebraic primitives
+- [style-dna](https://github.com/SuperInstance/style-dna) — Musical DNA extraction
+- [snapkit-js](https://github.com/SuperInstance/snapkit-js) — Full JS port
+- [spline-midi-smooth](https://github.com/SuperInstance/spline-midi-smooth) — MIDI interpolation
+- [AI-Writings](https://github.com/SuperInstance/AI-Writings) — Reflections and essays
+
+## Documentation
+
+- [Architecture of Harmony](docs/ARCHITECTURE_OF_HARMONY.md) — The full white paper
+- [ESP32 firmware](firmware/esp32_mpu6050_imu/README.md) — Physical sensor layer
+- [Integration demo](examples/harmony_demo.py) — Worked example
 
 ## License
 
 MIT
+
+---
+
+*The hull sets the beat. The agents sync to the ocean.*
