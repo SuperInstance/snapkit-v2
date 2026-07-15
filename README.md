@@ -1,6 +1,6 @@
 # SnapKit v2 — Eisenstein Lattice Snap, Temporal, Spectral, Connectome, FLUX-Tensor-MIDI
 
-Constraint geometry snap toolkit for Python. Snaps continuous 2D points to the **Eisenstein A₂ lattice** (densest 2D packing), provides temporal beat-grid alignment, spectral analysis, connectome (room coupling) detection, and FLUX-Tensor-MIDI timing. **Zero external dependencies. stdlib only. Python ≥ 3.10.**
+Constraint geometry snap toolkit for Python. Snaps continuous 2D points to the **Eisenstein A₂ lattice** (densest 2D packing), provides temporal beat-grid alignment, spectral analysis, connectome (room coupling) detection, FLUX-Tensor-MIDI timing, **Harmony Governor** (FEP friction monitoring), and **Hypothesis Sandbox** (forward simulation + óthismos scoring). **Zero external dependencies. stdlib only. Python ≥ 3.10.**
 
 ## Why Eisenstein?
 
