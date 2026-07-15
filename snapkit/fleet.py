@@ -204,7 +204,7 @@ class FleetCoordinator:
         ]
         if len(headings) >= 2:
             heading_range = max(headings) - min(headings)
-            if heading_range > 45:  # >45° spread
+            if heading_range > self._drift_threshold:  # configurable drift threshold
                 events.append(FleetEvent(
                     alert_type=FleetAlert.DRIFT,
                     vessels=list(active_vessels.keys()),

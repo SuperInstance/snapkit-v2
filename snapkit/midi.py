@@ -196,12 +196,10 @@ class FluxTensorMIDI:
     def render(self) -> List[MIDIEvent]:
         """Render all scheduled events in tick order.
 
-        OPTIMIZED: Uses list.sort() in-place instead of sorted() which
-        creates a new list every time. For repeated renders, this avoids
-        O(n) allocation overhead.
+        Returns a sorted COPY of the internal event list. Callers cannot
+        mutate the bridge state by modifying the returned list.
         """
-        self._events.sort()
-        return self._events
+        return sorted(self._events, key=lambda e: (e.tick, e.channel, e.value))
 
     def quantize(self, grid: int = 120) -> List[MIDIEvent]:
         """Snap all events to the nearest grid point."""

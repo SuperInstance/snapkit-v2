@@ -83,7 +83,9 @@ def autocorrelation(
         r0 += x * x
     r0 *= inv_n
 
-    if r0 == 0:
+    # Bail on non-finite or zero variance — return zero autocorrelations
+    # (zero signal, not noise). Prevents NaN propagation downstream.
+    if not (r0 > 0) or r0 != r0 or r0 == float('inf'):
         return [1.0] + [0.0] * max_lag
 
     inv_r0 = 1.0 / r0

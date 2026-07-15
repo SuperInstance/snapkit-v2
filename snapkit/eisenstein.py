@@ -131,11 +131,30 @@ def eisenstein_snap_batch(
 
 
 def eisenstein_distance(z1: complex, z2: complex) -> float:
-    """Compute the Eisenstein lattice distance between two complex numbers."""
-    diff: complex = z1 - z2
-    nearest: EisensteinInteger = eisenstein_round(diff)
-    residual: float = abs(diff - nearest.complex)
-    return math.sqrt(nearest.norm_squared) + residual
+    """Compute the Eisenstein lattice distance between two complex numbers.
+
+    Returns the Euclidean distance between z1 and z2 — the standard metric
+    on the lattice. The Eisenstein integer lattice is just a rotated/scaled
+    hexagonal sublattice of C, so Euclidean distance is a true metric.
+
+    Earlier versions tried to combine the lattice-step count with the
+    residual, which produced a non-metric quantity that violated the
+    triangle inequality. The Euclidean version is the only sensible answer.
+    """
+    return abs(z1 - z2)
+
+
+def eisenstein_lattice_residual(z: complex) -> float:
+    """Distance from z to the nearest Eisenstein integer.
+
+    This is the natural measure of how far a point sits from the hexagonal
+    packing lattice. Use this when you want the *residual* (the Voronoï
+    cell distance) rather than the Euclidean distance between two arbitrary
+    points.
+    """
+    diff = z
+    nearest = eisenstein_round(diff)
+    return abs(diff - nearest.complex)
 
 
 def eisenstein_fundamental_domain(z: complex) -> Tuple[EisensteinInteger, "EisensteinInteger"]:

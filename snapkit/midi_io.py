@@ -129,18 +129,27 @@ class TempoDeriver:
     __slots__ = (
         '_roll_history', '_window_size',
         '_last_bpm', '_last_period', '_stability',
+        '_sample_rate_hz', '_use_timestamps',
     )
 
-    def __init__(self, window_size: int = 256):
+    def __init__(self, window_size: int = 256, sample_rate_hz: float = 10.0):
         self._roll_history: Deque[float] = deque(maxlen=window_size)
         self._window_size = window_size
         self._last_bpm: float = 60.0
         self._last_period: float = 1.0
         self._stability: float = 0.0
+        self._sample_rate_hz = sample_rate_hz
+        self._use_timestamps = False
 
     def feed(self, roll_angle: float, timestamp: Optional[float] = None) -> None:
-        """Feed a roll angle reading from the IMU."""
+        """Feed a roll angle reading from the IMU.
+
+        If timestamps are provided, the tempo derivation uses real wall-clock
+        deltas. Otherwise it falls back to sample_rate_hz (default 10 Hz).
+        """
         self._roll_history.append(roll_angle)
+        if timestamp is not None:
+            self._use_timestamps = True
 
         if len(self._roll_history) >= 32:
             self._derive_tempo()
@@ -197,7 +206,7 @@ class TempoDeriver:
                     best_corr = acf[lag]
 
         if best_lag > 0:
-            sample_rate = 10.0  # Hz (assumed IMU rate)
+            sample_rate = self._sample_rate_hz
             period_seconds = best_lag / sample_rate
             if 0.5 <= period_seconds <= 20.0:
                 self._last_period = period_seconds

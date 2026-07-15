@@ -136,6 +136,15 @@ class TemporalConnectome:
     def add_room(self, name, activity):
         self._traces[name] = list(activity)
 
+    def replace_traces(self, traces: dict) -> None:
+        """Atomically swap the trace dictionary.
+
+        Used by HarmonyGovernor to refresh coupling analysis without
+        reaching into private state. Each value in `traces` must be a
+        sequence of floats.
+        """
+        self._traces = {name: list(trace) for name, trace in traces.items()}
+
     def analyze(self):
         names = list(self._traces.keys())
         pairs = []

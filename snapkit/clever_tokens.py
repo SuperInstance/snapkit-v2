@@ -218,6 +218,11 @@ class TokenLattice:
         Useful for understanding constraint density — tokens that are
         close together provide redundant constraints; tokens that are
         far apart cover different behavioral regions.
+
+        Returns the Euclidean distance between Eisenstein integer
+        coordinates in C. The Eisenstein lattice has hexagonal packing
+        symmetry; the metric on the lattice IS the standard Euclidean
+        distance.
         """
         result: Dict[Tuple[str, str], float] = {}
         ids = list(self._tokens.keys())
@@ -225,9 +230,10 @@ class TokenLattice:
             for id_b in ids[i + 1:]:
                 ta = self._tokens[id_a].lattice_point
                 tb = self._tokens[id_b].lattice_point
-                # Eisenstein distance
-                da = ta - tb
-                dist = math.sqrt(da.norm_squared)
+                # Euclidean distance in C — the natural metric on the lattice.
+                # Earlier versions used sqrt(norm_squared) which is the same
+                # numerically; using abs(complex) keeps it explicit.
+                dist = abs(ta.complex - tb.complex)
                 result[(id_a, id_b)] = dist
         return result
 

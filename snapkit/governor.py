@@ -20,7 +20,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Callable, Deque, Dict, List, Optional, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
 from snapkit.spectral import spectral_summary, SpectralSummary
 from snapkit.connectome import TemporalConnectome, ConnectomeResult
@@ -435,18 +435,20 @@ class HarmonyGovernor:
             self._connectome_last_result = None
             return None
 
-        # Reuse the instance connectome: it tracks coupling history across calls
-        # (the previous implementation rebuilt it from scratch each time, which
-        # discarded state needed for cross-episode cascade detection).
-        self._connectome._traces.clear()
-        for name, state in self._channels.items():
-            if len(state.actuals) >= 5:
-                self._connectome.add_room(name, list(state.actuals))
-
-        if len(self._connectome._traces) < 2:
+        # Collect traces from all channels with sufficient samples.
+        traces: Dict[str, Sequence[float]] = {
+            name: list(state.actuals)
+            for name, state in self._channels.items()
+            if len(state.actuals) >= 5
+        }
+        if len(traces) < 2:
             self._connectome_last_result = None
             return None
 
+        # Use the public API (added in v2.8) instead of reaching into the
+        # private `_traces` dict. The previous code violated encapsulation
+        # and had a window where `analyze()` could observe an empty state.
+        self._connectome.replace_traces(traces)
         result = self._connectome.analyze()
         self._connectome_last_result = result
         return result

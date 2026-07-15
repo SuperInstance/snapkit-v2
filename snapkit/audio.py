@@ -79,24 +79,27 @@ def synthesize_events(
         last_tick = event.tick
         sample_delta = int(tick_delta * seconds_per_tick * sample_rate)
 
-        # Render active notes
+        # Render active notes (shift their start time by the delta so they
+        # advance to the right sample position).
         for note in active_notes:
-            note[2] += sample_delta  # shift start time
-        samples_so_far = sum(max(0, s - 0) for s in range(len(samples)))
+            note[2] += sample_delta
 
-        # Convert event to sample position
-        # For simplicity, spread events evenly across the duration
-        event_pos = int(event.tick * duration_seconds / max(last_tick, 1) * sample_rate)
+        # Convert event to absolute sample position from its tick.
+        event_pos = int(event.tick * seconds_per_tick * sample_rate)
 
         if event.event_type == MIDIEventType.NOTE_ON:
             active_notes.append([
-                event.channel, event.value, 0, event.velocity,
+                event.channel, event.value, event_pos, event.velocity,
             ])
         elif event.event_type == MIDIEventType.NOTE_OFF:
             for note in active_notes:
                 if note[1] == event.value and note[0] == event.channel:
+                    # NOTE_ON start was recorded at note[2]; NOTE_OFF is at
+                    # event_pos. start < end is enforced.
+                    start = note[2]
+                    end = max(start + 1, event_pos)
                     completed_notes.append(
-                        (note[0], note[1], event_pos, event_pos, note[3])
+                        (note[0], note[1], start, end, note[3])
                     )
                     active_notes.remove(note)
                     break
@@ -155,37 +158,36 @@ def synthesize_demo(duration_seconds: float = 30.0) -> List[float]:
     total_samples = int(duration_seconds * sample_rate)
     samples = [0.0] * total_samples
 
-    # Chord progression: C - Am - F - G (classic)
-    chords = [
-        [60, 64, 67],  # C major
-        [57, 60, 64],  # A minor
-        [53, 57, 60],  # F major
-        [55, 59, 62],  # G major
+    # Chord progression arc — 20 seconds, 10 chords at 2s each.
+    # 0:00-8:00 — harmony (C - Am - F - G twice)
+    # 8:00-12:00 — dissonance (sharp clusters)
+    # 12:00-20:00 — resolution back to C
+    #
+    # Each tuple is (chord_notes, is_dissonant, description).
+    # The dissonance section must actually be reached — this was a P2 bug
+    # in the original: only 4 chords in the array, so chord_idx >= 4 was
+    # unreachable code.
+    progression = [
+        ([60, 64, 67], False, "C major — harmony"),       # 0
+        ([57, 60, 64], False, "A minor — harmony"),       # 1
+        ([53, 57, 60], False, "F major — harmony"),       # 2
+        ([55, 59, 62], False, "G major — harmony"),       # 3
+        ([60, 64, 67], False, "C major — harmony"),       # 4 (repeat to fill harmony section)
+        ([61, 64, 67, 70], True, "Cluster — dissonance"), # 5
+        ([58, 63, 66, 71], True, "More dissonance"),      # 6
+        ([55, 59, 60, 64], False, "Resolving"),           # 7
+        ([60, 64, 67], False, "C major — resolution"),    # 8
+        ([60, 64, 67, 72], False, "C with octave — home"),# 9
     ]
 
     bpm = 120
     seconds_per_chord = 2.0  # Each chord lasts 2 seconds
 
-    for chord_idx, chord_notes in enumerate(chords):
+    for chord_idx, (chord_notes, is_dissonant, _desc) in enumerate(progression):
         start = int(chord_idx * seconds_per_chord * sample_rate)
         end = int((chord_idx + 1) * seconds_per_chord * sample_rate)
         if start >= total_samples:
             break
-
-        # Is this the dissonance section? (2nd half)
-        is_dissonant = chord_idx >= 4
-        if chord_idx == 4:
-            # Sharp dissonance
-            chord_notes = [61, 64, 67, 70]  # Cluster
-        elif chord_idx == 5:
-            # More dissonance
-            chord_notes = [58, 63, 66, 71]
-        elif chord_idx == 6:
-            # Resolving back to C
-            chord_notes = [55, 59, 60, 64]
-        elif chord_idx >= 7:
-            # Resolution
-            chord_notes = [60, 64, 67]
 
         for note_num in chord_notes:
             freq = midi_to_freq(note_num)
