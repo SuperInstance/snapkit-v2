@@ -45,8 +45,14 @@ from snapkit.midi_io import (
     SENSOR_CC_MAP,
     ACTION_NOTE_MAP,
 )
+from snapkit.clever_tokens import (
+    TokenLattice,
+    CleverToken,
+    ConstraintType,
+    create_maritime_lattice,
+)
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 __all__ = [
     # Eisenstein
     "EisensteinInteger",
@@ -99,4 +105,9 @@ __all__ = [
     "AgentAction",
     "SENSOR_CC_MAP",
     "ACTION_NOTE_MAP",
+    # Clever Tokens (v2.3)
+    "TokenLattice",
+    "CleverToken",
+    "ConstraintType",
+    "create_maritime_lattice",
 ]
