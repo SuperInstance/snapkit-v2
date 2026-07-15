@@ -25,6 +25,8 @@ def entropy(data: List[float], bins: int = 10) -> float:
     min_val = data[0]
     max_val = data[0]
     for x in data:
+        if x != x:  # NaN check
+            continue
         if x < min_val:
             min_val = x
         elif x > max_val:
@@ -37,6 +39,8 @@ def entropy(data: List[float], bins: int = 10) -> float:
     counts = [0] * bins
 
     for x in data:
+        if x != x:  # NaN
+            continue
         idx = int((x - min_val) * inv_range)
         if idx >= bins:
             idx = bins - 1

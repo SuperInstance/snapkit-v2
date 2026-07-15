@@ -141,11 +141,24 @@ class ChannelState:
 
         # Spectral analysis on the prediction error stream
         errors = [p - a for p, a in zip(self.predictions, self.actuals)]
+        # Filter out NaN/Inf values
+        errors = [e for e in errors if e == e and abs(e) != float('inf')]
+        if len(errors) < 4:
+            phi = error
+            self.phi_history.append(phi)
+            return phi
+
         self.last_summary = spectral_summary(errors, bins=min(10, len(errors) // 2))
 
         # Normalized entropy (0-1 range)
         max_entropy = math.log2(min(10, len(errors) // 2)) if len(errors) >= 4 else 1.0
         norm_entropy = self.last_summary.entropy_bits / max_entropy if max_entropy > 0 else 0.0
+
+        # Direct error magnitude (normalized) — catches steady drift
+        # that low entropy misses (constant error = low entropy but high friction)
+        recent_errors = errors[-min(8, len(errors)):]
+        mean_abs_error = sum(abs(e) for e in recent_errors) / len(recent_errors)
+        norm_error = min(mean_abs_error / 10.0, 1.0)  # Normalize: 10+ units = max
 
         # Hurst penalty: if H drops below floor, the model has lost structure
         hurst_penalty = 0.0
@@ -156,8 +169,8 @@ class ChannelState:
         avg_latency = sum(self.latencies) / len(self.latencies)
         norm_latency = min(avg_latency / 1000.0, 1.0)  # Cap at 1s
 
-        # Φ = α·H + β·L + γ·hurst_penalty
-        phi = alpha * norm_entropy + beta * norm_latency + gamma * hurst_penalty
+        # Φ = α·H + β·L + γ·hurst_penalty + δ·error_magnitude
+        phi = alpha * norm_entropy + beta * norm_latency + gamma * hurst_penalty + 0.4 * norm_error
         self.phi_history.append(phi)
 
         return phi
