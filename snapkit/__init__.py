@@ -51,8 +51,19 @@ from snapkit.clever_tokens import (
     ConstraintType,
     create_maritime_lattice,
 )
+from snapkit.othismos_bridge import (
+    PressureGaugeChannel,
+    PhaseDetector,
+    create_othismos_governor,
+)
+from snapkit.fleet import (
+    FleetCoordinator,
+    VesselSnapshot,
+    FleetEvent,
+    FleetAlert,
+)
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 __all__ = [
     # Eisenstein
     "EisensteinInteger",
@@ -110,4 +121,13 @@ __all__ = [
     "CleverToken",
     "ConstraintType",
     "create_maritime_lattice",
+    # Óthismos Bridge (v2.4)
+    "PressureGaugeChannel",
+    "PhaseDetector",
+    "create_othismos_governor",
+    # Fleet (v2.4)
+    "FleetCoordinator",
+    "VesselSnapshot",
+    "FleetEvent",
+    "FleetAlert",
 ]

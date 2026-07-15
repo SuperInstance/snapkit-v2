@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harmony Dashboard — snapkit-v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    overflow: hidden;
+    height: 100vh;
+  }
+  #header {
+    padding: 12px 20px;
+    background: linear-gradient(180deg, #111118 0%, #0a0a0f 100%);
+    border-bottom: 1px solid #222;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #header h1 { font-size: 14px; font-weight: 400; color: #888; }
+  #header .live { font-size: 11px; color: #0f0; }
+  #header .live::before { content: "● "; animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+
+  #main { display: flex; height: calc(100vh - 45px); }
+  #left { flex: 1; padding: 16px; overflow-y: auto; }
+  #right { width: 400px; padding: 16px; border-left: 1px solid #222; overflow-y: auto; }
+
+  .channel-card {
+    background: #111118;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
+    transition: border-color 0.3s;
+  }
+  .channel-card.harmony { border-left: 3px solid #0f0; }
+  .channel-card.strain { border-left: 3px solid #fa0; }
+  .channel-card.surprise { border-left: 3px solid #f00; animation: alert-flash 1s infinite; }
+  @keyframes alert-flash { 50% { background: #1a0a0a; } }
+
+  .channel-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+  .phi-bar {
+    height: 6px;
+    background: #222;
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .phi-fill { height: 100%; transition: width 0.3s, background-color 0.3s; }
+  .phi-label { font-size: 11px; color: #666; }
+  .metrics { display: flex; gap: 16px; font-size: 11px; color: #888; margin-top: 6px; }
+
+  #piano-roll {
+    background: #111118;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  #roll-canvas { width: 100%; height: 200px; display: block; }
+  #tempo-display { font-size: 28px; color: #0fa; margin: 10px 0; }
+  #event-log { font-size: 11px; color: #888; max-height: 300px; overflow-y: auto; }
+  .event-entry { padding: 2px 0; border-bottom: 1px solid #1a1a1f; }
+  .event-time { color: #555; }
+  .event-alert { color: #f44; }
+  .event-harmony { color: #4f4; }
+
+  h3 { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>HARMONY DASHBOARD — snapkit-v2 Fleet Coordinator</h1>
+  <span class="live">LIVE</span>
+</div>
+
+<div id="main">
+  <div id="left">
+    <h3>Vessel Channels</h3>
+    <div id="channels"></div>
+  </div>
+  <div id="right">
+    <h3>Fleet Tempo (Hull-Derived)</h3>
+    <div id="tempo-display">— BPM</div>
+    <h3>MIDI Piano Roll</h3>
+    <div id="piano-roll"><canvas id="roll-canvas"></canvas></div>
+    <h3>Event Log</h3>
+    <div id="event-log"></div>
+  </div>
+</div>
+
+<script>
+// ═══ State ═══
+const state = {
+  channels: {},
+  events: [],
+  midiNotes: [],
+  bpm: 60,
+};
+
+// ═══ WebSocket / Polling ═══
+// In production, connect to the Fleet Coordinator's WebSocket
+// For demo, simulate with random data
+
+function simulateChannel(name, channel) {
+  const phi = Math.random() * 0.5 + (channel === 0 ? 0.05 : 0.1);
+  const entropy = Math.random() * 2;
+  const hurst = 0.4 + Math.random() * 0.4;
+  const bpm = 15 + Math.random() * 10;
+  const heading = 170 + Math.random() * 20;
+
+  return {
+    name, channel, phi, entropy, hurst, bpm, heading,
+    headingError: Math.abs(heading - 180),
+    seaState: phi < 0.3 ? 'calm' : phi < 1.0 ? 'moderate' : 'rough',
+    alarms: 0,
+    harmony: phi < 0.7,
+    strained: phi >= 0.7 && phi < 1.5,
+    surprised: phi >= 1.5,
+    lastUpdate: Date.now(),
+  };
+}
+
+// Simulate 3 vessels
+const vesselNames = ['helm', 'nav', 'deck'];
+vesselNames.forEach((name, i) => {
+  state.channels[name] = simulateChannel(name, i);
+});
+
+function tick() {
+  // Update channels with slight drift
+  Object.keys(state.channels).forEach((name, i) => {
+    const ch = state.channels[name];
+    ch.phi += (Math.random() - 0.5) * 0.1;
+    ch.phi = Math.max(0, ch.phi);
+
+    // Occasionally inject a surprise event
+    if (Math.random() < 0.02) {
+      ch.phi = 2.0 + Math.random();
+      state.events.unshift({
+        time: new Date().toLocaleTimeString(),
+        type: 'alert',
+        text: `${name.toUpperCase()} — Φ spike to ${ch.phi.toFixed(2)}`,
+      });
+    }
+
+    ch.harmony = ch.phi < 0.7;
+    ch.strained = ch.phi >= 0.7 && ch.phi < 1.5;
+    ch.surprised = ch.phi >= 1.5;
+    ch.lastUpdate = Date.now();
+
+    // Add to MIDI roll
+    state.midiNotes.push({
+      channel: i,
+      note: Math.floor(ch.heading / 360 * 127),
+      velocity: Math.floor(127 * (1 - ch.phi / 3)),
+      time: Date.now(),
+    });
+    if (state.midiNotes.length > 200) state.midiNotes.shift();
+  });
+
+  state.bpm = state.channels.helm?.bpm || 60;
+  render();
+}
+
+// ═══ Render ═══
+function render() {
+  renderChannels();
+  renderTempo();
+  renderPianoRoll();
+  renderEvents();
+}
+
+function renderChannels() {
+  const container = document.getElementById('channels');
+  container.innerHTML = '';
+
+  for (const [name, ch] of Object.entries(state.channels)) {
+    const cls = ch.harmony ? 'harmony' : ch.strained ? 'strain' : 'surprise';
+    const phiPct = Math.min(ch.phi / 3 * 100, 100);
+    const phiColor = ch.harmony ? '#0f0' : ch.strained ? '#fa0' : '#f00';
+
+    const card = document.createElement('div');
+    card.className = `channel-card ${cls}`;
+    card.innerHTML = `
+      <div class="channel-name">CH ${ch.channel}: ${name}</div>
+      <div class="phi-bar"><div class="phi-fill" style="width:${phiPct}%;background:${phiColor}"></div></div>
+      <div class="phi-label">Φ = ${ch.phi.toFixed(3)} &nbsp; deadband = 1.500 &nbsp; ${cls.toUpperCase()}</div>
+      <div class="metrics">
+        <span>Entropy: ${ch.entropy.toFixed(2)}b</span>
+        <span>Hurst: ${ch.hurst.toFixed(3)}</span>
+        <span>HDG: ${ch.heading.toFixed(1)}°</span>
+        <span>Sea: ${ch.seaState}</span>
+      </div>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function renderTempo() {
+  document.getElementById('tempo-display').textContent = `${state.bpm.toFixed(1)} BPM`;
+}
+
+function renderPianoRoll() {
+  const canvas = document.getElementById('roll-canvas');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.offsetWidth;
+  const h = canvas.height = 200;
+
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw grid
+  ctx.strokeStyle = '#1a1a1f';
+  for (let i = 0; i < 16; i++) {
+    const x = (i / 16) * w;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let i = 0; i < 8; i++) {
+    const y = (i / 8) * h;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  // Draw notes
+  const now = Date.now();
+  const timeWindow = 10000; // 10 seconds
+  const colors = ['#0fa', '#0af', '#fa0', '#f0a', '#a0f', '#0f0'];
+
+  for (const note of state.midiNotes) {
+    const age = now - note.time;
+    if (age > timeWindow) continue;
+
+    const x = w - (age / timeWindow) * w;
+    const y = h - (note.note / 127) * h;
+    const size = (note.velocity / 127) * 6 + 2;
+    const alpha = 1 - (age / timeWindow);
+
+    ctx.fillStyle = colors[note.channel % colors.length];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Labels
+  ctx.fillStyle = '#333';
+  ctx.font = '10px monospace';
+  ctx.fillText('127', 4, 14);
+  ctx.fillText('0', 4, h - 4);
+  ctx.fillText('NOW →', w - 40, h - 4);
+}
+
+function renderEvents() {
+  const container = document.getElementById('event-log');
+  container.innerHTML = state.events.slice(0, 30).map(e => {
+    const cls = e.type === 'alert' ? 'event-alert' : 'event-harmony';
+    return `<div class="event-entry"><span class="event-time">${e.time}</span> <span class="${cls}">${e.text}</span></div>`;
+  }).join('');
+}
+
+// Start
+setInterval(tick, 1000);
+render();
+</script>
+</body>
+</html>
