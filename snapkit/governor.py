@@ -59,6 +59,7 @@ class ChannelState:
         'phi_history', 'last_summary', 'last_update_tick',
         'deadband', 'hurst_floor',
         'sensor_lo', 'sensor_hi',
+        'target_value', 'task_error_weight',
         'is_surprised_latched',
     )
 
@@ -75,6 +76,8 @@ class ChannelState:
     hurst_floor: float
     sensor_lo: float
     sensor_hi: float
+    target_value: float
+    task_error_weight: float
     is_surprised_latched: bool
 
     def __init__(
@@ -86,6 +89,8 @@ class ChannelState:
         hurst_floor: float = 0.45,
         sensor_lo: float = 0.0,
         sensor_hi: float = 1.0,
+        target_value: Optional[float] = None,
+        task_error_weight: float = 0.0,
     ):
         self.name = name
         self.channel = channel
@@ -100,6 +105,15 @@ class ChannelState:
         self.hurst_floor = hurst_floor
         self.sensor_lo = sensor_lo
         self.sensor_hi = sensor_hi
+        # Task-error term: when set, Φ includes how far the channel's
+        # actual value is from its GOAL, regardless of whether the
+        # model fitted the actual value well. This catches the case
+        # where the model learns to predict a stable drift and Φ
+        # collapses, even though the boat is dangerously off course.
+        # Set target_value to enable; task_error_weight controls its
+        # contribution to Φ.
+        self.target_value = target_value
+        self.task_error_weight = task_error_weight
         # Alarm latch — fires once per surprise episode, not every tick
         # (fixes the bug where sustained alarms flood the Executive with
         # duplicate events for the same underlying alarm)
@@ -198,12 +212,26 @@ class ChannelState:
         latest_latency = self.latencies[-1] if self.latencies else 0.0
         norm_latency = min(latest_latency / 1000.0, 1.0)
 
-        # Φ = α·H + β·L + γ·hurst_penalty + δ·error_magnitude
+        # Task-error component: how far is the channel from its GOAL?
+        # If `actual` is far from `target_value`, the boat is off course
+        # regardless of how well the model predicted it. Crucial for
+        # catching steady drift the model absorbs (e.g. a current pushing
+        # the boat 20° off target while the LinearModel predicts it).
+        norm_task_error = 0.0
+        if self.target_value is not None and self.task_error_weight > 0:
+            span = self.sensor_hi - self.sensor_lo
+            err = actual - self.target_value
+            if span > 0:
+                err = (err + span / 2) % span - span / 2
+                norm_task_error = min(abs(err) / (span / 2), 1.0)
+
+        # Φ = α·H + β·L + γ·hurst_penalty + δ·error + ζ·task_error
         phi = (
             alpha * norm_entropy
             + beta * norm_latency
             + gamma * hurst_penalty
             + delta * norm_error
+            + self.task_error_weight * norm_task_error
         )
         self.phi_history.append(phi)
 
@@ -234,6 +262,7 @@ class HarmonyGovernor:
     __slots__ = (
         '_channels', '_flux', '_tempo', '_beat_grid',
         '_temporal_snap', '_connectome',
+        '_connectome_last_result',
         '_alarms', '_tick', '_sustained_threshold',
         '_sustained_counts', '_on_alarm',
     )
@@ -266,6 +295,8 @@ class HarmonyGovernor:
         window_size: int = 128,
         sensor_lo: float = 0.0,
         sensor_hi: float = 1.0,
+        target_value: Optional[float] = None,
+        task_error_weight: float = 0.0,
     ) -> ChannelState:
         """Register a new agent channel for monitoring.
 
@@ -275,6 +306,14 @@ class HarmonyGovernor:
                 The default (0..1) covers normalized sensors. For heading,
                 pass sensor_lo=0, sensor_hi=360.0 so MIDI pitch carries
                 information across the full sensor range.
+            target_value: The desired sensor value. If set, Φ includes a
+                task-error term so that the Governor fires even when the
+                model perfectly predicts the actual (which would otherwise
+                collapse Φ). The task-error term is only meaningful when
+                the sensor has an objective — e.g. heading with a target
+                course of 180°.
+            task_error_weight: Weight for the task-error component in Φ.
+                Default 0.0 (disabled). 0.5 is a reasonable starting point.
         """
         if name in self._channels:
             raise ValueError(f"channel '{name}' already registered")
@@ -283,9 +322,10 @@ class HarmonyGovernor:
             name=name, channel=channel,
             window_size=window_size, deadband=deadband,
             hurst_floor=hurst_floor,
+            sensor_lo=sensor_lo, sensor_hi=sensor_hi,
+            target_value=target_value,
+            task_error_weight=task_error_weight,
         )
-        state.sensor_lo = sensor_lo
-        state.sensor_hi = sensor_hi
         self._channels[name] = state
         self._sustained_counts[name] = 0
         return state

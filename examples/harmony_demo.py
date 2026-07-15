@@ -70,6 +70,8 @@ class BoatSim:
 
         # Rudder correction (with effectiveness factor)
         heading_change = wave_force - self.rudder * 0.3 * self._rudder_effectiveness
+        # Add steady current if present (e.g. fouled rudder + current)
+        heading_change += getattr(self, '_current_bias', 0.0)
         self.heading = (self.heading + heading_change) % 360.0
 
         self._wave_phase += 1
@@ -134,6 +136,8 @@ def run_demo():
         "helm", channel=0,
         deadband=1.5, window_size=64,
         sensor_lo=0.0, sensor_hi=360.0,
+        target_value=boat.target_heading,         # 180.0
+        task_error_weight=3.0,                    # strong goal-error contribution
     )
 
     # Layer 1: Hypothesis Sandbox for the helm agent
@@ -254,6 +258,9 @@ def run_demo():
     print()
 
     boat.change_sea_state("rough")
+    # Add a stuck-rudder scenario so the architecture MUST intervene.
+    # The rudder responds, but a strong current overwhelms it.
+    boat._current_bias = 0.45  # heading drift per tick from current (degrees)
 
     alarms_fired = 0
     executive_wakes = 0

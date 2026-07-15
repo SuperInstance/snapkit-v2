@@ -593,6 +593,10 @@ class ExecutiveAgent:
                     results.append(result)
                     self._history.append(result)
                     self._last_intervention_tick[name] = current_tick
+                    self._wake_count += 1
+                    self._last_wake_tick = current_tick
+                    if self._on_improvisation:
+                        self._on_improvisation(result)
 
         return results
 
