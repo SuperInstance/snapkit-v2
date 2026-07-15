@@ -51,54 +51,152 @@ class LinearModel:
 
     Learns the relationship: sensor_next = a * action + b * sensor_current + c
     Updates online with each observation.
+
+    Two corrections over the previous version:
+
+    1. **Circular wrap**: when `circular` is set (e.g. ``circular=(0.0, 360.0)``),
+       prediction error is computed modulo the wrapped range so that
+       ``359° -> 1°`` is a +2° change, not a -358° catastrophe.
+
+    2. **Input normalization**: ``sensor_before`` and ``action`` are
+       normalized to ~[-1, 1] for the gradient step so the learning rate
+       is invariant to sensor scale (a heading of 180 no longer dominates
+       an action of 0.5). Predictions are returned in the original scale.
     """
 
-    __slots__ = ('_a', '_b', '_c', '_lr', '_n', '_error_history')
+    __slots__ = (
+        '_a', '_b', '_c', '_lr', '_n', '_error_history',
+        'circular', 'sensor_norm', 'action_scale',
+    )
 
-    def __init__(self, learning_rate: float = 0.01):
+    def __init__(
+        self,
+        learning_rate: float = 0.01,
+        circular: Optional[Tuple[float, float]] = None,
+    ):
         self._a: float = 0.0
         self._b: float = 1.0
         self._c: float = 0.0
         self._lr: float = learning_rate
         self._n: int = 0
         self._error_history: Deque[float] = deque(maxlen=64)
+        # If set, error is wrapped into the half-open range [lo, hi)
+        self.circular: Optional[Tuple[float, float]] = circular
+        # Cached sensor midpoint and half-span for input normalization.
+        # For heading: midpoint=180, half_span=180.
+        if circular is not None:
+            lo, hi = circular
+            mid = (lo + hi) / 2
+            half = max((hi - lo) / 2, 1e-9)
+            self.sensor_norm = (mid, half)
+        else:
+            self.sensor_norm = (0.0, 1.0)
+        # For actions we assume a unit-normalized range; callers can
+        # override by passing action values already in [-1, 1].
+        self.action_scale = 1.0
+
+    def _wrap(self, value: float) -> float:
+        """Wrap a value into the configured circular range, if any."""
+        if self.circular is None or value != value:
+            return value
+        lo, hi = self.circular
+        span = hi - lo
+        if span <= 0:
+            return value
+        offset = (value - lo) % span
+        return lo + offset
+
+    def _delta_circular(self, a: float, b: float) -> float:
+        """Signed delta a -> b, taking the shortest path around the wrap."""
+        if self.circular is None or a != a or b != b:
+            return b - a
+        lo, hi = self.circular
+        span = hi - lo
+        if span <= 0:
+            return b - a
+        diff = b - a
+        half = span / 2
+        # Wrap to [-half, half)
+        diff = (diff + half) % span - half
+        # Adjust sign so |diff| <= half
+        if diff < -half:
+            diff += span
+        return diff
 
     def predict(self, action: float, sensor_current: float) -> Tuple[float, float]:
-        """Predict next sensor value. Returns (prediction, confidence)."""
-        prediction = self._a * action + self._b * sensor_current + self._c
+        """Predict next sensor value (raw scale). Returns (prediction, confidence)."""
+        mid, half = self.sensor_norm
+        # Normalize sensor to ~[-1, 1] for the linear combination.
+        n_sensor = (sensor_current - mid) / half if half > 0 else 0.0
+        n_action = action / self.action_scale if self.action_scale else 0.0
 
-        # Confidence based on sample size and recent error
+        # Linear model in normalized space, then convert prediction back to raw scale.
+        n_pred = self._a * n_action + self._b * n_sensor + self._c
+        prediction = n_pred * half + mid
+        if self.circular is not None:
+            prediction = self._wrap(prediction)
+
+        # Confidence based on sample size and recent error.
         if self._n < 5:
             conf = 0.1
         else:
             avg_err = sum(self._error_history) / len(self._error_history) if self._error_history else 1.0
-            conf = max(0.0, min(1.0, 1.0 / (1.0 + avg_err * 10)))
+            # Normalize by half-span so "good" is "error << sensor range / 2"
+            norm = avg_err / max(half, 1e-9)
+            conf = max(0.0, min(1.0, 1.0 / (1.0 + norm * 5.0)))
 
         return prediction, conf
 
     def update(self, action: float, sensor_before: float, sensor_after: float) -> float:
-        """Update model with observed transition. Returns prediction error."""
-        prediction = self._a * action + self._b * sensor_before + self._c
-        error = sensor_after - prediction
+        """Update model with observed transition. Returns prediction error (absolute)."""
+        mid, half = self.sensor_norm
+        n_before = (sensor_before - mid) / half if half > 0 else 0.0
+        n_after = (sensor_after - mid) / half if half > 0 else 0.0
+        n_action = action / self.action_scale if self.action_scale else 0.0
 
-        # Online gradient descent
-        self._a += self._lr * error * action
-        self._b += self._lr * error * sensor_before
-        self._c += self._lr * error
+        # Predicted normalized next value
+        n_pred = self._a * n_action + self._b * n_before + self._c
+        # Use circular-aware signed error when wrap is configured; otherwise raw.
+        if self.circular is not None:
+            # Difference in raw scale, wrap to shortest path
+            raw_pred = n_pred * half + mid
+            signed_err = self._delta_circular(raw_pred, sensor_after)
+        else:
+            signed_err = (n_after - n_pred) * half
 
-        abs_error = abs(error)
+        # NaN/Inf guard
+        if signed_err != signed_err or abs(signed_err) == float('inf'):
+            return 0.0
+
+        # Update weights in normalized space (so learning rate is scale-invariant).
+        self._a += self._lr * signed_err * n_action / max(half, 1e-9)
+        self._b += self._lr * signed_err * n_before / max(half, 1e-9)
+        self._c += self._lr * signed_err / max(half, 1e-9)
+
+        abs_error = abs(signed_err)
         self._error_history.append(abs_error)
         self._n += 1
 
         return abs_error
 
+    def reset(self) -> None:
+        """Reset the model weights to defaults (used by Executive.RESET_MODEL)."""
+        self._a = 0.0
+        self._b = 1.0
+        self._c = 0.0
+        self._n = 0
+        self._error_history.clear()
+
     @property
     def model_quality(self) -> float:
-        """How well the model fits (0-1, higher = better)."""
+        """How well the model fits (0-1, higher = better), normalized by sensor half-span."""
         if self._n < 5 or not self._error_history:
             return 0.0
         avg_err = sum(self._error_history) / len(self._error_history)
-        return max(0.0, min(1.0, 1.0 / (1.0 + avg_err * 10)))
+        _, half = self.sensor_norm
+        norm = avg_err / max(half, 1e-9)
+        # 5% of half-span = excellent; 50% = poor
+        return max(0.0, min(1.0, 1.0 / (1.0 + norm * 5.0)))
 
     @property
     def sample_count(self) -> int:
@@ -382,6 +480,22 @@ class HypothesisSandbox:
     @property
     def sensor_name(self) -> str:
         return self._sensor_name
+
+    def reset_model(self) -> None:
+        """Reset the internal model and history. Used by Executive.RESET_MODEL.
+
+        Wipes learned weights, error history, sensor/action history, and
+        novelty tracking. After this call the model behaves as freshly
+        instantiated. Use this when the agent's understanding has become
+        unhinged from reality (e.g. Hurst exponent collapses).
+        """
+        self._model.reset()
+        self._action_history.clear()
+        self._sensor_history.clear()
+        self._error_history.clear()
+        self._novelty_window.clear()
+        self._last_predictions.clear()
+        self._last_actuals.clear()
 
     def state(self) -> Dict:
         """Snapshot of sandbox state."""

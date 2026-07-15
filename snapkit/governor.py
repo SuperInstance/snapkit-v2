@@ -58,6 +58,8 @@ class ChannelState:
         'predictions', 'actuals', 'latencies',
         'phi_history', 'last_summary', 'last_update_tick',
         'deadband', 'hurst_floor',
+        'sensor_lo', 'sensor_hi',
+        'is_surprised_latched',
     )
 
     name: str
@@ -71,6 +73,9 @@ class ChannelState:
     last_update_tick: int
     deadband: float
     hurst_floor: float
+    sensor_lo: float
+    sensor_hi: float
+    is_surprised_latched: bool
 
     def __init__(
         self,
@@ -79,6 +84,8 @@ class ChannelState:
         window_size: int = 128,
         deadband: float = 2.0,
         hurst_floor: float = 0.45,
+        sensor_lo: float = 0.0,
+        sensor_hi: float = 1.0,
     ):
         self.name = name
         self.channel = channel
@@ -91,6 +98,12 @@ class ChannelState:
         self.last_update_tick = 0
         self.deadband = deadband
         self.hurst_floor = hurst_floor
+        self.sensor_lo = sensor_lo
+        self.sensor_hi = sensor_hi
+        # Alarm latch — fires once per surprise episode, not every tick
+        # (fixes the bug where sustained alarms flood the Executive with
+        # duplicate events for the same underlying alarm)
+        self.is_surprised_latched = False
 
     @property
     def phi(self) -> float:
@@ -105,7 +118,7 @@ class ChannelState:
 
     @property
     def is_strained(self) -> bool:
-        return self.deadband * 0.7 <= self.phi < self.deadband
+        return self.deadband * 0.7 <= self.phi and self.phi < self.deadband
 
     @property
     def is_surprised(self) -> bool:
@@ -120,11 +133,27 @@ class ChannelState:
         alpha: float = 0.6,
         beta: float = 0.3,
         gamma: float = 0.1,
+        delta: float = 0.4,
     ) -> float:
         """Record a prediction/actual pair and compute friction.
 
         Returns the instantaneous Φ value.
+
+        Φ = α·H + β·L + γ·hurst_penalty + δ·error_magnitude
+
+        Defaults chosen so coefficients (α=0.6, β=0.3, γ=0.1, δ=0.4) sum
+        to ≤1.4 when components are normalised — informative, not magic.
         """
+        # NaN/Inf guard — non-finite predictions crash MIDI export and confuse averages
+        if (
+            prediction != prediction or actual != actual
+            or prediction in (float('inf'), float('-inf'))
+            or actual in (float('inf'), float('-inf'))
+        ):
+            phi = float('nan')
+            self.phi_history.append(phi)
+            return phi
+
         self.predictions.append(prediction)
         self.actuals.append(actual)
         self.latencies.append(latency_ms)
@@ -141,7 +170,6 @@ class ChannelState:
 
         # Spectral analysis on the prediction error stream
         errors = [p - a for p, a in zip(self.predictions, self.actuals)]
-        # Filter out NaN/Inf values
         errors = [e for e in errors if e == e and abs(e) != float('inf')]
         if len(errors) < 4:
             phi = error
@@ -158,19 +186,25 @@ class ChannelState:
         # that low entropy misses (constant error = low entropy but high friction)
         recent_errors = errors[-min(8, len(errors)):]
         mean_abs_error = sum(abs(e) for e in recent_errors) / len(recent_errors)
-        norm_error = min(mean_abs_error / 10.0, 1.0)  # Normalize: 10+ units = max
+        norm_error = min(mean_abs_error / 10.0, 1.0)
 
         # Hurst penalty: if H drops below floor, the model has lost structure
         hurst_penalty = 0.0
         if self.last_summary.hurst < self.hurst_floor:
             hurst_penalty = (self.hurst_floor - self.last_summary.hurst) * 2.0
 
-        # Latency component (normalized)
-        avg_latency = sum(self.latencies) / len(self.latencies)
-        norm_latency = min(avg_latency / 1000.0, 1.0)  # Cap at 1s
+        # Latency component (normalized) — use LATEST latency not the average,
+        # so a sudden spike isn't diluted by history (Kimi bug 9-style fix)
+        latest_latency = self.latencies[-1] if self.latencies else 0.0
+        norm_latency = min(latest_latency / 1000.0, 1.0)
 
         # Φ = α·H + β·L + γ·hurst_penalty + δ·error_magnitude
-        phi = alpha * norm_entropy + beta * norm_latency + gamma * hurst_penalty + 0.4 * norm_error
+        phi = (
+            alpha * norm_entropy
+            + beta * norm_latency
+            + gamma * hurst_penalty
+            + delta * norm_error
+        )
         self.phi_history.append(phi)
 
         return phi
@@ -230,8 +264,18 @@ class HarmonyGovernor:
         deadband: float = 2.0,
         hurst_floor: float = 0.45,
         window_size: int = 128,
+        sensor_lo: float = 0.0,
+        sensor_hi: float = 1.0,
     ) -> ChannelState:
-        """Register a new agent channel for monitoring."""
+        """Register a new agent channel for monitoring.
+
+        Args:
+            sensor_lo: Lower bound of the sensor value range (for MIDI mapping).
+            sensor_hi: Upper bound of the sensor value range (for MIDI mapping).
+                The default (0..1) covers normalized sensors. For heading,
+                pass sensor_lo=0, sensor_hi=360.0 so MIDI pitch carries
+                information across the full sensor range.
+        """
         if name in self._channels:
             raise ValueError(f"channel '{name}' already registered")
         self._flux.add_room(name, channel=channel)
@@ -240,6 +284,8 @@ class HarmonyGovernor:
             window_size=window_size, deadband=deadband,
             hurst_floor=hurst_floor,
         )
+        state.sensor_lo = sensor_lo
+        state.sensor_hi = sensor_hi
         self._channels[name] = state
         self._sustained_counts[name] = 0
         return state
@@ -265,13 +311,26 @@ class HarmonyGovernor:
         state = self._channels[channel_name]
         phi = state.record(prediction, actual, latency_ms, self._tick)
 
-        # Emit a MIDI event encoding this observation
-        # Velocity = inverse of friction (high vel = harmony)
-        velocity = max(1, min(127, int(127 * (1.0 - min(phi / 3.0, 1.0)))))
+        # Map actual → MIDI note using this channel's configured sensor range.
+        # Without this, a heading of e.g. 180° maps to note=22860 (saturated to 127),
+        # making every pitch identical. With sensor_lo/sensor_hi (e.g. 0..360),
+        # the note carries actual information across the sensor's full scale.
+        span = state.sensor_hi - state.sensor_lo
+        if span > 0 and actual == actual and abs(actual) != float('inf'):
+            norm = max(0.0, min(1.0, (actual - state.sensor_lo) / span))
+            note = int(round(norm * 127))
+        else:
+            note = 64  # neutral middle
+
+        # NaN-safe velocity: high when φ is small, low when it spikes
+        if phi == phi and abs(phi) != float('inf'):
+            velocity = max(1, min(127, int(round(127 * (1.0 - min(phi / 3.0, 1.0))))))
+        else:
+            velocity = 1
+
         self._flux.note_on(
             channel_name, tick=self._tick,
-            note=int(min(127, actual * 127)),
-            velocity=velocity,
+            note=note, velocity=velocity,
         )
 
         # Check for alarm conditions
@@ -280,10 +339,19 @@ class HarmonyGovernor:
         return phi
 
     def _check_alarms(self, state: ChannelState) -> None:
-        """Check if a channel's friction warrants an alarm."""
+        """Check if a channel's friction warrants an alarm.
+
+        Alarm handling uses a latch: once a SURPRISE episode has fired,
+        we don't fire another alarm until the channel returns to harmony.
+        This counts *episodes*, not *surprised ticks* — a sustained
+        50-tick surprise episode is one alarm, not fifty.
+        """
         if state.is_surprised:
             self._sustained_counts[state.name] += 1
-            if self._sustained_counts[state.name] >= self._sustained_threshold:
+            if (
+                self._sustained_counts[state.name] >= self._sustained_threshold
+                and not state.is_surprised_latched
+            ):
                 alarm = FrictionAlarm(
                     channel=state.channel,
                     room_name=state.name,
@@ -298,32 +366,50 @@ class HarmonyGovernor:
                             f"exceeded deadband {state.deadband}",
                 )
                 self._alarms.append(alarm)
+                state.is_surprised_latched = True
                 if self._on_alarm:
                     self._on_alarm(alarm)
         elif state.is_strained:
+            # Strain degrades, but doesn't break the latch — wait for harmony
             self._sustained_counts[state.name] = max(0, self._sustained_counts[state.name] - 1)
         else:
-            # In harmony — decay sustained count
+            # In harmony — decay sustained count AND release the latch
             self._sustained_counts[state.name] = max(0, self._sustained_counts[state.name] - 2)
+            state.is_surprised_latched = False
 
     def update_connectome(self) -> Optional[ConnectomeResult]:
         """Analyze coupling between channels.
 
         Call this periodically (every N ticks) to detect whether
         agents that should be resonating have decoupled.
+
+        The result is cached on `self._connectome` so downstream consumers
+        (like DiagnosticEngine) can read coupling without rebuilding it.
         """
         if len(self._channels) < 2:
+            self._connectome_last_result = None
             return None
 
-        conn = TemporalConnectome(threshold=0.3, max_lag=8)
+        # Reuse the instance connectome: it tracks coupling history across calls
+        # (the previous implementation rebuilt it from scratch each time, which
+        # discarded state needed for cross-episode cascade detection).
+        self._connectome._traces.clear()
         for name, state in self._channels.items():
             if len(state.actuals) >= 5:
-                conn.add_room(name, list(state.actuals))
+                self._connectome.add_room(name, list(state.actuals))
 
-        if len(conn._rooms) < 2:
+        if len(self._connectome._traces) < 2:
+            self._connectome_last_result = None
             return None
 
-        return conn.analyze()
+        result = self._connectome.analyze()
+        self._connectome_last_result = result
+        return result
+
+    @property
+    def connectome_result(self) -> Optional[ConnectomeResult]:
+        """Last computed connectome result (None if never computed)."""
+        return getattr(self, "_connectome_last_result", None)
 
     @property
     def alarms(self) -> List[FrictionAlarm]:

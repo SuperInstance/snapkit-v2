@@ -19,6 +19,7 @@ import math
 import sys
 import os
 import time
+import random
 
 # Add parent to path for direct execution
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -123,27 +124,44 @@ def run_demo():
     boat = BoatSim()
 
     # Layer 2: Harmony Governor
+    # Note sensor_lo/sensor_hi so the MIDI export encodes the actual heading
+    # across the full 0..360° range instead of saturating every note to 127.
     governor = HarmonyGovernor(
         beat_period=1.0,
         sustained_threshold=3,
     )
-    governor.register_channel("helm", channel=0, deadband=1.5, window_size=64)
+    governor.register_channel(
+        "helm", channel=0,
+        deadband=1.5, window_size=64,
+        sensor_lo=0.0, sensor_hi=360.0,
+    )
 
     # Layer 1: Hypothesis Sandbox for the helm agent
+    # `circular=(0, 360)` makes LinearModel handle heading wrap-around correctly.
     sandbox = HypothesisSandbox(
         sensor_name="heading",
         actuation_cost_weight=0.3,
         sim_cost_weight=0.7,
+        model=__import__('snapkit.sandbox', fromlist=['LinearModel']).LinearModel(
+            learning_rate=0.01,
+            circular=(0.0, 360.0),
+        ),
     )
     sandbox.set_action_range(-1.0, 1.0, step=0.1)
 
-    # Layer 3: Executive Agent
+    # Layer 3: Executive Agent — wired to the sandbox so RESET_MODEL actually
+    # resets the model's weights. Escalation callback prints to stdout.
     executive = ExecutiveAgent(governor)
     executive.register_agent(
         "helm", channel=0,
         objective="maintain heading with minimum rudder stress",
+        target_sensor=boat.target_heading,
         constraint_tokens=["base:helm:v1"],
         io_connections=["heading", "rudder"],
+    )
+    executive.set_sandbox("helm", sandbox)
+    executive.set_escalation_callback(
+        lambda alarm, reason: print(f"  ☎  ESCALATION CALLBACK: {reason}")
     )
 
     # I/O: MIDI Bridge with tempo derivation
@@ -339,29 +357,73 @@ def run_demo():
     print("SUMMARY")
     print("═" * 60)
     print()
+
+    # Honest reporting — match claims to data.
+    final_heading = boat.heading
+    final_error = boat.heading_error
+    final_phi = governor.channel_state("helm").phi
+    final_surprised = governor.channel_state("helm").is_surprised
+    drift_detected = final_surprised or final_error > 15
+
     if executive.wake_count > 0:
-        print("  The helm agent maintained heading in calm seas.")
-        print("  When the sea state shifted, Φ spiked, the Governor")
-        print("  fired alarms, and the Executive improvised.")
+        applied_count = sum(1 for r in executive.history if r.applied)
+        print(f"  Phase 1:  Helm agent held heading in calm seas (model quality "
+              f"{sandbox.model_health:.0%}).")
+        print(f"  Phase 2:  Sea state shifted. Φ spiked → Governor fired "
+              f"{alarms_fired} alarm(s).")
+        print(f"  Phase 3:  Executive woke {executive.wake_count}×. "
+              f"{applied_count}/{executive.wake_count} actions actually closed "
+              f"the control loop (the rest were intent-only — no hook wired).")
         print()
-        print("  Triadic architecture — working as designed:")
-        print("    Layer 1 (Sandbox)  = deckhand testing actions")
-        print("    Layer 2 (Governor) = high-water alarm measuring Φ")
-        print("    Layer 3 (Executive)= captain improvising solutions")
+        print(f"  Final heading: {final_heading:.1f}° (target "
+              f"{boat.target_heading:.0f}°, error {final_error:.1f}°).")
+        if drift_detected:
+            print(f"  ⚠ Final state still drifted: Φ={final_phi:.3f}, "
+                  f"surprised={final_surprised}.")
+            print(f"  Executive made the architecture aware of the drift; "
+                  f"complete recovery requires the boat to actually comply "
+                  f"with the action corrections.")
+        else:
+            print(f"  ✓ Architecture recovered to harmony (Φ={final_phi:.3f}).")
+        print()
+        print("  Triadic architecture — verified:")
+        print("    Layer 1 (Sandbox)  = forward simulation + LinearModel w/ circular wrap")
+        print("    Layer 2 (Governor) = Φ = entropy + error + Hurst + latency, with alarm latch")
+        print("    Layer 3 (Executive)= action handlers that mutate the sandbox / config / callbacks")
     else:
-        print("  The helm agent maintained heading in calm seas.")
-        print("  In rough seas with a fouled rudder, the boat drifted")
-        print("  20° off target — but the agent's model *learned the drift*")
-        print("  so prediction error stayed low. The Governor didn't fire.")
+        print(f"  Phase 1:  Helm agent held heading in calm seas (model quality "
+              f"{sandbox.model_health:.0%}).")
+        print(f"  Phase 2:  Sea state shifted but Governor did NOT fire.")
+        print(f"           Final heading {final_heading:.1f}° (target "
+              f"{boat.target_heading:.0f}°, drift {final_error:.1f}°).")
         print()
-        print("  This reveals a key insight: spectral entropy alone")
-        print("  doesn't catch steady-state drift. The error-magnitude")
-        print("  component in Φ needs tuning with real sea data.")
+        print(f"  This is a real failure of the architecture — not an")
+        print(f"  'insight to tune later'.")
         print()
-        print("  This is the experimental frontier from the white paper:")
-        print("  'Tuning the FEP Deadband' — Section VIII, Question 3.")
+        if sandbox.model_health > 0.8:
+            print(f"  ROOT CAUSE: LinearModel converges to fit the drift")
+            print(f"  as if it were normal boat motion. Once the model")
+            print(f"  learns the bias, prediction error collapses and Φ")
+            print(f"  returns to harmony. The error-magnitude component")
+            print(f"  catches SOME drift, but if the drift is slow and")
+            print(f"  smooth, the model absorbs it.")
+            print()
+            print(f"  WHAT'S MISSING: Φ doesn't include a TASK-ERROR term")
+            print(f"  (heading error vs target). It tracks model fit, not")
+            print(f"  goal achievement. A boat that's perfectly wrong about")
+            print(f"  its heading scores the same as one that's perfectly")
+            print(f"  on course.")
+            print()
+            print(f"  This was flagged by the code review: see")
+            print(f"  REVIEW.md / claude-review.md / minimax-review.md")
+            print(f"  — the FEP framing is more metaphor than implementation.")
+        else:
+            print(f"  φ stayed under deadband for a different reason.")
+            print(f"  Model quality: {sandbox.model_health:.0%}.")
         print()
-        print("  The architecture works. The deadband needs your boat.")
+        print(f"  This is a real failure mode. Adding a task-error term")
+        print(f"  (heading error vs target) to Φ would catch this. Until")
+        print(f"  then, the architecture needs a watchdog external to Φ.")
     print()
     print("  The hull set the beat. The agents synced to the ocean.")
     print()
