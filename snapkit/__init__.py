@@ -29,8 +29,24 @@ from snapkit.sandbox import (
     HypothesisResult,
     SandboxScore,
 )
+from snapkit.executive import (
+    ExecutiveAgent,
+    DiagnosticEngine,
+    ExecutiveAction,
+    AgentConfig,
+    ImprovisationResult,
+)
+from snapkit.midi_io import (
+    MIDIBridge,
+    SensorMapper,
+    TempoDeriver,
+    SensorReading,
+    AgentAction,
+    SENSOR_CC_MAP,
+    ACTION_NOTE_MAP,
+)
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 __all__ = [
     # Eisenstein
     "EisensteinInteger",
@@ -69,4 +85,18 @@ __all__ = [
     "CorrelationModel",
     "HypothesisResult",
     "SandboxScore",
+    # Executive (v2.2)
+    "ExecutiveAgent",
+    "DiagnosticEngine",
+    "ExecutiveAction",
+    "AgentConfig",
+    "ImprovisationResult",
+    # MIDI I/O (v2.2)
+    "MIDIBridge",
+    "SensorMapper",
+    "TempoDeriver",
+    "SensorReading",
+    "AgentAction",
+    "SENSOR_CC_MAP",
+    "ACTION_NOTE_MAP",
 ]
