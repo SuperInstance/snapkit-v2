@@ -164,8 +164,13 @@ class ChannelState:
             or prediction in (float('inf'), float('-inf'))
             or actual in (float('inf'), float('-inf'))
         ):
-            phi = float('nan')
+            # Treat NaN as a maximum-alarm state instead of silent failure.
+            # The model has diverged and the governor must speak up; otherwise
+            # the architecture dies quietly (see minimax-review.md P0-2).
+            phi = self.deadband * 2.0
             self.phi_history.append(phi)
+            # Latch so the alarm fires at least once
+            self.is_surprised_latched = False
             return phi
 
         self.predictions.append(prediction)
